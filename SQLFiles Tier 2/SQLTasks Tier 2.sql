@@ -35,16 +35,16 @@ exploring the data, and getting acquainted with the 3 tables. */
 /* Q1: Some of the facilities charge a fee to members, but some do not.
 Write a SQL query to produce a list of the names of the facilities that do. */
 
-/* A1: SELECT name FROM `Facilities` WHERE membercost > 0
-*/
+/* A1: SELECT name, membercost FROM `Facilities` WHERE membercost > 0 */
+
+
 
 
 /* Q2: How many facilities do not charge a fee to members? */
 
-/* A2: SELECT COUNT(*) FROM `Facilities` WHERE membercost = 0
-*/
-/* A2: 4
-*/
+/* A2: SELECT COUNT(*) FROM `Facilities` WHERE membercost = 0 */
+
+
 
 
 /* Q3: Write an SQL query to show a list of facilities that charge a fee to members,
@@ -52,14 +52,22 @@ where the fee is less than 20% of the facility's monthly maintenance cost.
 Return the facid, facility name, member cost, and monthly maintenance of the
 facilities in question. */
 
-/* A3: 
+
+/* A3:
+SELECT facid, name, membercost, monthlymaintenance, (membercost / monthlymaintenance) as feeperc 
+FROM `Facilities`
+WHERE membercost / monthlymaintenance < 0.20
+*/
+
+
+/* A3 w/o feeperc:
 SELECT facid, name, membercost, monthlymaintenance
 FROM `Facilities`
-WHERE (
-membercost / monthlymaintenance < 0.20
-)
-LIMIT 0 , 30
+WHERE membercost / monthlymaintenance < 0.20
 */
+
+
+
 
 
 /* Q4: Write an SQL query to retrieve the details of facilities with ID 1 and 5.
@@ -69,17 +77,25 @@ Try writing the query without using the OR operator. */
 SELECT *
 FROM `Facilities`
 WHERE name LIKE '%2'
-LIMIT 0 , 30
 */
 
-/* A4:
+/* A4 alternative:
+SELECT *
+FROM `Facilities` AS f
+WHERE f.facid IN 
+	(SELECT (CASE WHEN f.facid = 1 THEN f.facid
+     WHEN f.facid = 5 THEN f.facid
+     ELSE NULL END) AS subquery)
+*/
+
+
+/* extra */
+/* wrong A4:
 SELECT *
 FROM `Facilities`
 WHERE facid =1
 OR facid =5
-LIMIT 0 , 30
 */
-
 
 
 
@@ -90,15 +106,12 @@ more than $100. Return the name and monthly maintenance of the facilities
 in question. */
 
 /* A5: 
-SELECT name, monthlymaintenance, (
-
-CASE WHEN monthlymaintenance <100
+SELECT name, monthlymaintenance,
+(CASE WHEN monthlymaintenance < 100
 THEN 'cheap'
 ELSE 'expensive'
-END
-) AS monthlymaintenancedescription
+END) AS monthlymaintenancedescription
 FROM `Facilities`
-LIMIT 0 , 30
 */
 
 
@@ -108,15 +121,38 @@ LIMIT 0 , 30
 who signed up. Try not to use the LIMIT clause for your solution. */
 */
 
+
+
+
 /* A6:
+SELECT firstname,
+	surname,
+	joindate
+FROM `Members`
+WHERE joindate IN
+(SELECT MAX(joindate) as maxjoindate FROM `Members`)
+*/
+
+/* lesser A6:
+SELECT firstname, surname, joindate FROM `Members` ORDER BY joindate DESC LIMIT 0, 1
+*/
+
+
+/* wrong A6:
 SELECT firstname, surname FROM `Members`
 */
 
-/* A6:
+/* wrong A6:
 SELECT firstname, surname FROM `Members` WHERE joindate IS NOT NULL
 */
 
-
+/* does not work A6:
+SELECT firstname,
+    surname,
+    joindate
+FROM `Members`
+WHERE joindate IN MAX(joindate)
+*/
 
 
 
@@ -132,6 +168,16 @@ ON  b.facid = f.facid
 LEFT JOIN `Members` as m
 ON m.memid = b.memid
 WHERE name = 'Tennis Court 1' OR name = 'Tennis Court 2'
+ORDER BY membername
+*/
+
+/* alternative A7:
+SELECT DISTINCT f.name, concat(surname, ' ',firstname) as membername FROM `Bookings` as b
+LEFT JOIN `Facilities`as f
+ON  b.facid = f.facid
+LEFT JOIN `Members` as m
+ON m.memid = b.memid
+WHERE name LIKE 'Tennis Court%'
 ORDER BY membername
 */
 
@@ -163,77 +209,31 @@ ORDER BY cost DESC
 */
 
 
+
+
 /* Q9: This time, produce the same result as in Q8, but using a subquery. */
 
 /*
-SELECT *
+SELECT ff.name as facilityname,
+	concat(mm.firstname, ' ', mm.surname) as membername,
+	(CASE WHEN mm.memid != 0 THEN ff.membercost * slots
+	ELSE ff.guestcost * slots END) AS cost
 FROM `Bookings` as b
-LEFT JOIN `Members` as m
-ON m.memid = b.memid
-LEFT JOIN `Facilities` as f
-ON b.facid = f.facid
+LEFT JOIN (SELECT m.memid, m.firstname, m.surname FROM `Members` as m) as mm
+ON mm.memid = b.memid
+LEFT JOIN (SELECT f.facid, f.name, f.membercost, f.guestcost FROM `Facilities` as f) as ff
+ON b.facid = ff.facid
 WHERE DATE(starttime) = '2012-09-14'
-
-
-SELECT *
-FROM `Bookings` as b
-LEFT JOIN `Members` as m
-ON m.memid = b.memid
-LEFT JOIN `Facilities` as f
-ON b.facid = f.facid
-WHERE DATE(starttime) = '2012-09-14'
-
-
-SELECT facilityname, membername, cost
-FROM ( SELECT facilityname
-)
+AND (mm.memid = 0
+AND guestcost * slots > 30)
+OR (mm.memid != 0 AND membercost * slots > 30)
+ORDER BY cost DESC
 */
 
 
 
 
 
-
-/* Q8: list of bookings on 2012-09-14 costing the member (or guest) > $30.
-guest user's ID is always 0.
-Include in output:
-facility,
-name of the member as a single column,
-cost.
-Order by descending cost*/
-
-/* ???????????????????????????????????????*/
-/* ???????????????????????????????????????*/
-
-
-/*
-
-SELECT subm.firstname
-FROM `Bookings` as b
-WHERE (DATE(starttime) = '2012-09-14')
-AND b.facid IN (SELECT f.facid FROM `Facilities` AS f) AS subf
-AND b.memid IN (SELECT m.memid, m.firstname FROM `Members` AS m) AS subm
-
-
-WITH Bookings2012 AS (SELECT * FROM `Bookings` as b F)
-
-SELECT subm.firstname
-FROM (SELECT * `Bookings` as b F
-WHERE (DATE(starttime) = '2012-09-14')
-AND b.facid IN (SELECT f.facid FROM `Facilities` AS f) AS subf
-AND b.memid IN (SELECT m.memid, m.firstname FROM `Members` AS m) AS subm
-
-
-*/
-
-
-
-
-
-
-
-/* ???????????????????????????????????????*/
-/* ???????????????????????????????????????*/
 
 
 
@@ -326,22 +326,19 @@ GROUP BY m.memid"""
 /* Q13: Find the facilities usage by month, but not guests */
 
 
-
-
 /*
 """
-SELECT strftime('%m', b.starttime) as month,
-    SUM(b.slots) as totalslots
-FROM Members as m
-LEFT JOIN Bookings as b
-ON m.memid = b.memid
-LEFT JOIN Facilities as f
-ON f.facid = b.facid
-WHERE m.memid != 0
-GROUP BY month"""
-*/
+SELECT strftime('%m', bb.starttime) as month,
+    ff.name,
+    SUM(bb.slots) as totalslots
+FROM (SELECT m.memid FROM `Members` as m WHERE m.memid != 0) as mm
+LEFT JOIN (SELECT b.facid, b.memid, b.starttime, b.slots FROM `Bookings` as b) as bb
+ON mm.memid = bb.memid
+LEFT JOIN (SELECT f.facid, f.name FROM `Facilities` as f) as ff
+ON ff.facid = bb.facid
+GROUP BY ff.name, month"""
 
-/* ???????????????????????????????????*/
+*/
 
 
 
