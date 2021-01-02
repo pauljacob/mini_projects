@@ -1,0 +1,58 @@
+
+import relevant libraries
+Q:
+
+A:
+
+
+
+
+
+
+Q:
+What can you infer about the nature of these variables, as output by the info() method?
+
+Which variables might be suitable for regression analysis, and why? For those variables that aren't suitable for regression analysis, is there another type of statistical modeling for which they are suitable?
+
+A:
+all variables are numeric
+
+all variables are suitable for regression analysis because they are all numeric
+
+for variables that are not suitable for regression analysis a histogram per category is appropriate
+
+
+
+
+Q:
+We can see so much about the quality variable just from this simple visualization.
+
+Answer yourself: what value do most wines have for quality?
+
+What is the minimum quality value below, and the maximum quality value?
+
+What is the range? Remind yourself of these summary statistical concepts by looking at p.49 of the AoS.
+
+
+But can you think of a problem with making this variable the dependent variable of regression analysis?
+
+Remember the example in AoS on p.122 of predicting the heights of children from the heights of parents?
+
+Take a moment here to think about potential problems before reading on.
+
+A:
+Most wins have 5 for quality with 6 as a close second
+
+The minimum quality wine value is 3. The maximum quality wine value is 8.
+
+
+I cannot think of a problem with making this variable (i.e. quality) the dependent variable of regression analysis.
+
+Yes, I remember the example of predicting the height of children from the the hiehgts of parents in AoS.
+
+I do not see regression to the mean as a problem in regression.
+
+***quality is a discrete variable not a continuous variable here.
+
+
+
