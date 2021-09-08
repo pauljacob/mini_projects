@@ -131,3 +131,5 @@ dmypy.json
 dask-worker-space/
 1600185186_GridSearchKNN_Case_Study/.DS_Store
 1585016537_Apps_Case_Study/.DS_Store
+Bayesian Optimization Case Study/.DS_Store
+.DS_Store
