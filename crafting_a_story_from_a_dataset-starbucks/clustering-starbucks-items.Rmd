@@ -1,0 +1,398 @@
+---
+title: "Clustering Starbucks items"
+author: "Jonathan Bouchet"
+date: "`r Sys.Date()`"
+output:
+ html_document:
+    fig_width: 10
+    fig_height: 7
+    toc: yes
+    number_sections : yes
+    code_folding: show
+---
+
+<center><img src="https://digit.hbs.org/wp-content/uploads/sites/2/2017/02/sbux-banner.jpeg"></center>
+
+```{r setup}
+options(width=100)
+knitr::opts_chunk$set(out.width='1000px',dpi=200,message=FALSE,warning=FALSE)
+```
+
+```{r}
+#load packages and csv file
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(RColorBrewer)
+library(ggthemes)
+library(corrplot)
+library(ggrepel)
+library(fmsb)
+library(ggdendro)
+library(factoextra)
+library(NbClust)
+```
+
+* The idea of this kernel is to make a classification of Starbuck's items between their type (`food`, `drink`) based on their nutrition facts.
+
+#Data preparation
+
+```{r}
+foods <- read.csv(con <- file("../input/starbucks-menu-nutrition-food.csv",encoding = "UCS-2LE"))
+drinks<-read.csv('../input/starbucks_drinkMenu_expanded.csv',stringsAsFactors=F,sep=',')
+
+#rename columns
+colnames(foods)<-c('item','Calories','Fat','Carb','Fiber','Protein')
+colnames(drinks)<-c("Beverage_category","Beverage","Beverage_prep","Calories","Total.Fat","Trans.Fat","Saturated.Fat","Sodium","Total.Carbohydrates","Cholesterol","Dietary.Fibre","Sugars","Protein","Vitamin.A","Vitamin.C","Calcium","Iron","Caffeine" )
+
+#convert character columns to numeric
+drinks[,c(14:17)]<-apply(drinks[,c(14:17)], 2, function(x) as.numeric(gsub("%","",x)))
+drinks[,c(5,18)] = apply(drinks[,c(5,18)], 2, function(x) as.numeric(x))
+
+#impute type and keep only identical columns
+foods$type<-rep('food',nrow(foods))
+drinks$type<-rep('drink',nrow(drinks))
+
+#rbind datasets and remove NA's
+#res<-data.frame(rbind(drinks,foods))
+#res_2<-as.data.frame(res %>% na.omit())
+```
+
+##Color stuffs
+
+* Define Starbuck's color palette (as defined [from here](http://www.color-hex.com/color-palette/8208))
+
+```{r fig.width=8, fig.height=3, fig.align='center',eval=F}
+#green, white,  yellow-ish, brown, dark-brown 
+#to be used / implemented later
+cols<-c('#0b421a','#fffcfc','#eac784','#362415','#604c4c')
+start<-c(0,2,4,6,8)
+end<-c(2,4,6,8,10)
+rects<-data.frame(xmin=start,xmax=end,ymin=0,ymax=2,cols)
+ggplot() + geom_rect(data=rects,aes(xmin = start, xmax = xmax, ymin = ymin, ymax = ymax), alpha = 1,fill=as.character(cols)) + theme_void()
+```
+
+#`Beverages` EDA
+```{r}
+g1<-drinks %>% na.omit() %>% group_by(Beverage_prep) %>% mutate(mean_cal = mean(Calories)) %>% 
+  ggplot(aes(x=reorder(Beverage_prep,mean_cal),y=Calories,color=Calories)) + 
+  geom_boxplot(colour='#0b421a',size=.5,alpha=.5) + 
+  geom_jitter(shape=16,width=.2,size=2) + theme_fivethirtyeight() + coord_flip() + 
+  scale_color_gradientn(colours=colorRampPalette(c("#eac784","#362415"))(20)) + 
+  theme(legend.position='none') + ggtitle('Calories per Beverage preparation')
+
+g2<-drinks %>% na.omit() %>% group_by(Beverage_prep) %>% mutate(mean_caf = mean(Caffeine)) %>% 
+  ggplot(aes(x=reorder(Beverage_prep,mean_caf),y=Caffeine,color=Caffeine)) + 
+  geom_boxplot(colour='#0b421a',size=.5,alpha=.5) + 
+  geom_jitter(shape=16,width=.2,size=2) + theme_fivethirtyeight() + coord_flip() + 
+  scale_color_gradientn(colours=colorRampPalette(c("#eac784","#362415"))(20)) + 
+  theme(legend.position='none') + ggtitle('Caffeine per Beverage preparation') 
+
+g3<-drinks %>% na.omit() %>% group_by(Beverage_prep) %>% mutate(mean_sug = mean(Sugars)) %>% 
+  ggplot(aes(x=reorder(Beverage_prep,mean_sug),y=Sugars,color=Sugars)) + 
+  geom_boxplot(colour='#0b421a',size=.5,alpha=.5) + 
+  geom_jitter(shape=16,width=.2,size=2) + theme_fivethirtyeight() + coord_flip() + 
+  scale_color_gradientn(colours=colorRampPalette(c("#eac784","#362415"))(20)) + 
+  theme(legend.position='none') + ggtitle('Sugars per Beverage preparation')
+```
+
+```{r fig.width=12, fig.height=14, fig.align='center',eval=T}
+grid.arrange(g1,g2,g3)
+```
+
+```{r}
+drinks %>% na.omit() %>% ggplot(aes(x=Calories, y=Sugars,color=Beverage_prep)) + geom_point(aes(size=Caffeine),alpha=.75) + geom_label_repel(
+    aes(label=ifelse(Calories>400 & Sugars>70,Beverage,"")),
+    fontface = 'bold', size=3,
+    color = '#0b421a',
+    segment.color = 'grey50',force=100,
+    alpha=.7) + theme_fivethirtyeight() + scale_color_manual(name="",values=colorRampPalette(c("#eac784","#362415"))(length(unique(drinks$Beverage_prep))))  + ggtitle('Sugars vs. Calories\nwhat you should probably not drink ...')
+```
+
+That's a bit surprising given the name of the Beverages (`without Whipped Cream`) but it seems the number of Calories is more related to the Beverage type itself :
+```{r}
+drinks %>% arrange(-Calories) %>% select(Beverage, Beverage_prep, Calories, Sugars, Caffeine) %>% head(10)
+```
+
+So clearly try to avoid (if you pay attention to the # of Calories/Sugars) the `White Chocolate Mocha` and the `Java Chip`.
+
+##Correlation
+```{r}
+corrplot(cor(drinks %>% na.omit() %>% select_if(is.numeric),method='pearson'),
+         method='ellipse',
+         order="AOE",tl.cex=1,
+         col=colorRampPalette(c("#362415","#fffcfc","#0b421a"))(100),
+         bg="#eac784",tl.col="#604c4c",addgrid.col="#fffcfc")
+```
+
+##Summary
+
+* Averages by `Beverage_prep`
+
+```{r}
+res<-data.frame(drinks %>% na.omit() %>% group_by(Beverage_prep) %>% select_if(is.numeric) %>% summarise_all(funs(mean),1))
+min<-rep.int(0,15)
+max<- ceiling(apply(res[,2:16], 2, function(x) max(x, na.rm = TRUE)) %>% sapply(as.double)) %>% as.vector
+max<-max+1
+```
+
+```{r}
+par(mfrow=c(4,4),bg="#eac784",mar=c(1,1,1,1))
+col_line<-(col2rgb("#604c4c"))/255
+col_fill<-(col2rgb("#362415"))/255
+for(i in 1:nrow(res)){
+	radarchart(rbind(max,min,res[i,2:15]), 
+	axistype=2 ,
+	pcol=rgb(col_line[1],col_line[2],col_line[3], alpha = 1) ,
+	pfcol=rgb(col_fill[1], col_fill[2], col_fill[3],.5) ,
+	plwd=2 , cglcol="#0b421a", 
+	cglty=1, 
+	axislabcol="#fffcfc", cglwd=0.8, vlcex=1,palcex=1.4,
+	title=as.character(res$Beverage_prep[i]),col.axis="white")
+}
+```
+
+#`Food` EDA
+
+```{r}
+foods %>% na.omit() %>% ggplot(aes(x=Calories, y=Fat, color=Calories)) + geom_point(aes(size=Carb),alpha=.75) + geom_label_repel(
+    aes(label=ifelse(Calories>500 & Fat>25,as.character(item),"")),
+    fontface = 'bold', size=3,
+    color = '#0b421a',
+    segment.color = 'grey50',force=100,
+    alpha=.7) + theme_fivethirtyeight() + 
+  scale_color_gradientn(colors=colorRampPalette(c("#eac784","#362415"))(20))  + 
+  ggtitle('Fat vs. Calories\nwhat you should probably not eat ...') + 
+  guides(colour=FALSE)
+```
+
+Again a surprising result given the name of the items (`Salad`) but it seems the number of Calories is more related to the Beverage type itself :
+```{r}
+foods %>% arrange(-Calories) %>% head(5)
+```
+
+When looking at the individual distributions, we see that these 5 main items are either super rich in 1 or several of `Calories`,`Fat`,`Carb`,`Fiber`,`Protein`.
+
+```{r,eval=T}
+numFeatures<-c('Calories','Fat','Carb','Fiber','Protein')
+cnt<-0
+listFeatures<-list()
+for(i in 1:length(numFeatures)){
+    x = numFeatures[i]
+    if(i>1){
+      title<-paste0(x,'(g)')
+    }
+    else{
+      title<-x
+    }
+    listFeatures[[i]]<-ggplot(data=foods,aes_string(x)) + 
+      geom_histogram(alpha=.75,bins=20,color="#eac784",fill="#0b421a") + 
+      theme(
+      legend.title=element_blank(),
+      legend.position='top',
+      legend.key.size = unit(.2, "cm"),
+      axis.title = element_text(size=8),
+      legend.text=element_text(size=5)) +
+      theme_fivethirtyeight() + ggtitle(title)
+}
+```
+
+```{r,eval=T}
+do.call(grid.arrange, c(listFeatures, ncol=3))
+```
+
+* The distribution of the number of calories of items as a function of their type is pretty well separated
+* Same for the number of Carbonates
+
+##Features correlation
+```{r,eval=T}
+corrplot(cor(foods %>% na.omit() %>% select_if(is.numeric),method='pearson'),
+         method='ellipse',
+         order="AOE",tl.cex=1,
+         col=colorRampPalette(c("#362415","#fffcfc","#0b421a"))(100),
+         bg="#eac784",tl.col="#604c4c",addgrid.col="#fffcfc")
+```
+
+* There is a strong linear correlation between the number of `Calories` and the amount of `Fat` and `Carb`
+
+#Clusters
+##data preparation and quick EDA
+
+* rename some feature before rbinding datasets
+```{r}
+colnames(drinks)[2]<-'item'
+colnames(drinks)[5]<-'Fat'
+colnames(drinks)[9]<-'Carb'
+colnames(drinks)[11]<-'Fiber'
+starbucksItems<-as.data.frame(rbind(drinks %>% select(item,Calories,Fat,Carb,Fiber,Protein,type), foods %>% select(item,Calories,Fat,Carb,Fiber,Protein,type)))
+```
+
+```{r}
+starbucksItems %>% ggplot(aes(x=Calories, y=Fat,color=type,size=Carb)) + geom_jitter(shape=16,width=.2,alpha=.75) + theme_fivethirtyeight() + scale_color_manual(values=c("#eac784","#0b421a")) + ggtitle("Fat vs. Calories")
+```
+
+```{r}
+cnt<-0
+listFeatures<-list()
+for(i in 1:length(numFeatures)){
+  x = numFeatures[i]
+  if(i>1){title<-paste0(x,'(g)')}
+  else{title<-x}
+  listFeatures[[i]]<-ggplot(data=starbucksItems,aes_string(x)) + 
+    geom_histogram(aes(fill=type),alpha=.75,bins=20) + 
+    theme(
+      legend.title=element_blank(),
+      legend.position='top',
+      legend.key.size = unit(.2, "cm"),
+      axis.title = element_text(size=8),
+      legend.text=element_text(size=5)) +
+    theme_fivethirtyeight() + ggtitle(title) + 
+    scale_fill_manual(values=c("#eac784","#0b421a"))
+}
+```
+```{r}
+do.call(grid.arrange, c(listFeatures, ncol=3))
+```
+
+##Clusters based on numerical features
+```{r}
+tempo<-starbucksItems
+rownames(tempo) <- make.names(tempo$item, unique = TRUE)
+tempo$name<-rownames(tempo)
+
+#default parameters
+dd <- dist(scale(tempo %>% select_if(is.numeric)), method = "euclidean")
+dd.dendro <- as.dendrogram(hclust(dd, method = "ward.D2"))
+dendro_data <- dendro_data(dd.dendro)
+
+#making color labels
+kk<-tempo[,c(7,8)]
+labs <- label(dendro_data)
+colnames(kk)[2]<-'label'
+newlabs<-merge(labs,kk,by='label')
+#head(newlabs)
+```
+
+```{r fig.width=12, fig.height=20, fig.align='center',eval=T}
+ggplot(segment(dendro_data)) + 
+  geom_segment(aes(x=x, y=y, xend=xend, yend=yend)) + 
+  geom_text(data=newlabs,aes(label=label, x=x, y=-3, colour=newlabs$type),size=2) + 
+  scale_color_manual(name="",values=c("#eac784","#0b421a")) + 
+  coord_flip() + theme_fivethirtyeight() + 
+  theme(axis.text=element_blank()) + ggtitle("Dendrogram of Starbucks items")
+```
+
+* The point of this plot is to show that sub-groups can be found within `foods` and `drinks` categories
+
+##Best number of clusters
+
+```{r results="hide",fig.keep="none"}
+nb <- NbClust(scale(tempo %>% select_if(is.numeric)), distance = "euclidean", min.nc = 2, max.nc = 10, method = "ward.D2", index ="all")
+print(nb)
+```
+
+```{r}
+fviz_nbclust(nb)
+```
+
+* `2` clusters is the most probable (and was expected because the dataset has been merged from `foods` and `drinks` items)
+* however we also see that `4` clusters on a second choice and from the dendogram where the names of items were colored accroding being `food` or `drink`, that a subdivision may be better.
+* It can be understood easily that a `croissant` and its variants will have a different nutrition facts than a `salad`
+
+###Testing `4` clusters
+
+```{r}
+#k=4
+grp<-cutree(hclust(dd, method = "ward.D2"), k=4)
+tempo$group<-grp
+g0<-tempo %>% ggplot(aes(x=Calories, y=Fat,color=type,size=Carb)) + 
+  geom_jitter(shape=16,width=.2,alpha=.75) + theme_fivethirtyeight() + 
+  scale_color_manual(values=c("#eac784","#0b421a")) + ggtitle("Fat vs. Calories by type")
+
+g1<- tempo %>% ggplot(aes(x=Calories, y=Fat,color=factor(group),size=Carb)) + 
+  geom_jitter(shape=16,width=.2,alpha=.75) + theme_fivethirtyeight() + 
+  scale_color_brewer(palette='Paired') + ggtitle("Fat vs. Calories for found clusters")
+
+grid.arrange(g0,g1,ncol=2)
+```
+#Finding better clusters
+
+* run kmeans and check what is the best number of clusters is found for different methods
+* plot the items according these new groups
+
+##for `food` items
+```{r}
+foods_clean <- as.data.frame(scale(foods %>% na.omit() %>% select_if(is.numeric)))
+ff <- dist(foods_clean, method = "euclidean")
+g1<-fviz_nbclust(foods_clean, kmeans, method = "wss")
+g2<-fviz_nbclust(foods_clean, kmeans, method = "silhouette")
+```
+```{r fig.width=12, fig.height=6, fig.align='center',eval=T}
+grid.arrange(g1,g2,ncol=2)
+```
+
+`4` is the best number of clusters according the `silhouette` method (_"quality of a clustering. That is, it determines how well each object lies within its cluster"_), whereas the elbow for the `wss` is not well pronounced at `4`.
+
+```{r}
+listPlot<-list()
+cnt<-0
+for(i in 4:7){
+  cnt<-cnt+1
+  res <- kmeans(foods_clean, i, nstart = 1)
+  listPlot[[cnt]]<-fviz_cluster(res, data = foods_clean, geom = "point", stand = TRUE, frame.type = "norm",repel=T,show.clust.cent=F ,ggtheme = theme_fivethirtyeight(),outlier.color = "black") + ggtitle(paste0("# of Clusters:",i))
+}
+```
+
+```{r fig.width=10, fig.height=8, fig.align='center',eval=T}
+do.call(grid.arrange, c(listPlot,ncol=2))
+```
+
+##for `Drinks` items
+```{r}
+drinks_clean<-as.data.frame(scale(drinks %>% na.omit() %>% select_if(is.numeric)))
+ff <- dist(drinks_clean, method = "euclidean")
+g1<-fviz_nbclust(drinks_clean, kmeans, method = "wss")
+g2<-fviz_nbclust(drinks_clean, kmeans, method = "silhouette")
+```
+
+```{r fig.width=12, fig.height=6, fig.align='center',eval=T}
+grid.arrange(g1,g2,ncol=2)
+```
+
+```{r}
+listPlot<-list()
+cnt<-0
+for(i in 2:7){
+	cnt<-cnt+1
+	res <- kmeans(drinks_clean, i)
+	listPlot[[cnt]]<-fviz_cluster(res, data = drinks_clean, geom = "point", stand = TRUE, frame.type = "norm",repel=T,
+	show.clust.cent=F ,ggtheme = theme_fivethirtyeight(),outlier.color = "black") + scale_color_brewer(palette='Set1') + ggtitle(paste0("# of Clusters:",i))
+}
+```
+
+```{r fig.width=10, fig.height=8, fig.align='center',eval=T}
+do.call(grid.arrange, c(listPlot,ncol=3))
+```
+
+`2` really seems the best number of clusters for `drinks`, although I'm not sure why the agglomeration of points in the upper left is not found.
+
+On a side note, we can try to infer the number of clusters by the uniqueness of the `Category` and `Beverage_prep :
+
+```{r}
+drinks %>% na.omit() %>% group_by(Beverage_prep) %>% summarize(count=n())
+drinks %>% na.omit() %>% group_by(Beverage_category) %>% summarize(count=n())
+```
+
+, and ultimately
+```{r}
+drinks %>% na.omit() %>% group_by(Beverage_prep, Beverage_category) %>% summarize(count=n())
+```
+leads to more than 50 differents clusters ???
+
+<strong>History :</strong>
+
+* _version 1 : initial commit_
+* _version 2 : added clusters section_
+* _version 3 : updated clusters section_
+
+<hr>
